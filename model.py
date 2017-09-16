@@ -14,12 +14,6 @@ import mnist_input_data_test
 import numpy
 
 
-#import matplotlib.pyplot as plt
-#from pylab import show
-
-#TODO: test and debug
-
-
 class cyclegan(object):
     def __init__(self, sess, args):
 
@@ -52,53 +46,46 @@ class cyclegan(object):
         self.labeledtarget = self.pernum * self.classes
         self.lbatchsize = min([64,self.labeledtarget])
 
+        # generator hyper-parameters
 
-        #problem: form of trans is not changing, just shading
-        #plans:
-        # trying new kld loss (already ready)
-
-
-        # generator weights
-
-        #VAE
+        # VAE losses
         self.emu = 0
         self.esig = 1
 
-        self.lbce = 1 #.001
-        self.ltbce = 1 #.001
-        self.lkld = .1 #.0001
+        self.lbce = 1
+        self.ltbce = 1
+        self.lkld = .1
 
-        #GAN
-        #change this next
-        self.ldrecon = .5 #1  # 2#1
-        self.ldtransl = .5 #1  # 10  # 1.5 # 5
+        # GAN losses
 
-        #Classifier
-        #next: lower s-t?
-        self.lSSclass = .1 #.5 #10 #10 #20 #5
-        self.lSTclass = 0 #10
-        self.lTTclass = .1 #1
-        self.lTSclasspseudo = 0 #.01 #.001 #30 #5
-        self.lTSclassreal = 0# .5 #.01 #300  # 5
+        self.ldrecon = .5
+        self.ldtransl = .5
 
-        # discriminator weights
-        #next
+        # Classifier losses
+        # for semi-supervised version
+        self.lSSclass = 0
+        self.lSTclass = 0
+        self.lTTclass = 0
+        self.lTSclasspseudo = 0  # labeled from classifier
+        self.lTSclassreal = 0  # inherently labeled target image
 
-        self.ldfeats = 1 # 1 # .1
+        # Discriminator hyper-parameters
+        self.ldfeats = 1
 
-        self.ldsclass = 10 #.1 #2
-        self.ldstclass = 0 #1 #.1  #
-        self.ldtclass = 4 #.1 #.1
+        self.ldsclass = 10
+        self.ldstclass = 0
+        self.ldtclass = 0
 
-        # network variables
+        # network variables # do not change, only configuration of 4,3 work right now
         self.encshared = 4
         self.decshared = 3
-        #self.dscshared = 2
 
+        # sizing for noise variables
         self.lastmult = 8 # * 2
         self.epsize = 64 * self.lastmult
         self.zdepth = 1
 
+        # for storing max accuracies
         self.maxts = -1
         self.maxt = -1
 
@@ -155,15 +142,12 @@ class cyclegan(object):
         self.num_batch = int(self.loadedtargetdata.train.num_examples / args.batch_size)
         self._build_model()
         self.saver = tf.train.Saver()
-        self.pool = ImagePool(args.max_size)
-
-        self.spreadarray = numpy.ndarray([10])
-        self.spreadarray.fill(self.batch_size / 10.)
 
         self.savesample = True
 
     def _build_model(self):
 
+        # placeholders for input during trianing
         self.real_S = tf.placeholder(tf.float32, [None, self.image_size, self.image_size, self.input_c_dim],
                                      name='real_S_images')
         self.real_T = tf.placeholder(tf.float32, [None, self.image_size, self.image_size, self.input_c_dim],
@@ -174,9 +158,6 @@ class cyclegan(object):
 
         self.l_t_epsilon = tf.placeholder(tf.float32, [None,self.zdepth,self.zdepth, self.epsize], name='epsilon_t')
         self.l_s_epsilon = tf.placeholder(tf.float32, [None,self.zdepth,self.zdepth, self.epsize], name='epsilon_s')
-
-        #self.l_t_epsilon2 = tf.placeholder(tf.float32, [None, self.zdepth, self.zdepth, self.epsize], name='epsilon_t2')
-        #self.l_s_epsilon2 = tf.placeholder(tf.float32, [None, self.zdepth, self.zdepth, self.epsize], name='epsilon_s2')
 
         self.y_S = tf.placeholder(tf.float32, [None, 10], name='labels')
         self.y_T = tf.placeholder(tf.float32, [None, 10], name='labels_target')
@@ -205,29 +186,27 @@ class cyclegan(object):
         # SAMPLING
 
         self.l_s_epsilon = tf.random_normal(tf.shape(self.e_s_sig_sh), name='epsilon_s')  # [?, self.epsize]
-        #self.e_s_std = tf.exp(.5 * self.e_s_sig_sh)  # [?, 30]
+        # self.e_s_std = tf.exp(.5 * self.e_s_sig_sh)  # [?, 30]
         self.e_s_std = self.e_s_sig_sh
         self.e_s_z = tf.add(self.e_s_mu_sh, tf.multiply(self.e_s_std, self.l_s_epsilon), name='e_s_z')
 
         self.l_t_epsilon = tf.random_normal(tf.shape(self.e_t_sig_sh), name='epsilon_t')  # [?, self.epsize]
-        #self.e_t_std = tf.exp(.5 * self.e_t_sig_sh)  # [?, 30]
+        # self.e_t_std = tf.exp(.5 * self.e_t_sig_sh)  # [?, 30]
         self.e_t_std = self.e_t_sig_sh
         self.e_t_z = tf.add(self.e_t_mu_sh, tf.multiply(self.e_t_std, self.l_t_epsilon), name='e_t_z')
 
         self.l_lt_epsilon = tf.random_normal(tf.shape(self.e_lt_sig_sh), name='epsilon_lt')  # [?, self.epsize]
-        #self.e_lt_std = tf.exp(.5 * self.e_lt_sig_sh)  # [?, 30]
+        # self.e_lt_std = tf.exp(.5 * self.e_lt_sig_sh)  # [?, 30]
         self.e_lt_std = self.e_lt_sig_sh
         self.e_lt_z = tf.add(self.e_lt_mu_sh, tf.multiply(self.e_lt_std, self.l_lt_epsilon), name='e_lt_z')
 
-
         # DECODER NETWORK
         # decoded images from z of real_images
-        self.d_t_shared = self.decoder_shared(self.e_t_z, #self.e_t_z2, self.e_t_z3,
+        self.d_t_shared = self.decoder_shared(self.e_t_z,
                                               reuse=False, shared=self.decshared, name="decoder_x")
-        self.d_s_shared = self.decoder_shared(self.e_s_z, #self.e_s_z2, self.e_s_z3,
+        self.d_s_shared = self.decoder_shared(self.e_s_z,
                                               reuse=True, shared=self.decshared, name="decoder_x")
-
-        self.d_lt_shared = self.decoder_shared(self.e_lt_z, #self.e_lt_z2, self.e_lt_z3,
+        self.d_lt_shared = self.decoder_shared(self.e_lt_z,
                                               reuse=True, shared=self.decshared, name="decoder_x")
 
         self.ae_T_T = self.decoder(self.d_t_shared, shared=self.decshared, reuse=False, name="decoder_t")
@@ -238,8 +217,6 @@ class cyclegan(object):
         self.ae_lT_S = self.decoder(self.d_lt_shared, shared=self.decshared, reuse=True, name="decoder_s")
         self.ae_lT_T = self.decoder(self.d_lt_shared, shared=self.decshared, reuse=True, name="decoder_t")
 
-
-
         # DISCRIMINATOR NETWORK
         # discriminators for generated images, inputs: real_images
 
@@ -249,7 +226,6 @@ class cyclegan(object):
         self.D_S_S, self.D_S_S_d = self.discriminator(self.ae_S_S, reuse=True, name="discriminatorS")
         self.D_T_h, self.D_T_hd = self.discriminator(self.real_T, reuse=True, name="discriminatorT")
         self.D_S_h, self.D_S_hd = self.discriminator(self.real_S, reuse=True, name="discriminatorS")
-
 
         self.D_lT_S, self.D_lT_S_d = self.discriminator(self.ae_lT_S, reuse=True, name="discriminatorS")
         self.D_lT_T, self.D_lT_T_d = self.discriminator(self.ae_lT_T, reuse=True, name="discriminatorT")
@@ -273,9 +249,8 @@ class cyclegan(object):
         self.D_lT_T_dom, self.D_lT_T_class, self.D_lT_T_feats = self.discriminator_sh(
             self.D_lT_T, self.D_lT_T_d, reuse=True, name="discriminatorX")
 
-
-        self.pseudolabel1 = tf.one_hot(tf.argmax(self.D_T_S_class,1),10)
-        self.pseudolabel2 = tf.nn.softmax(self.D_T_S_class, 1)
+        #elf.pseudolabel1 = tf.one_hot(tf.argmax(self.D_T_S_class,1),10)
+        #self.pseudolabel2 = tf.nn.softmax(self.D_T_S_class, 1)
 
         self.pseudo_y_T = tf.placeholder(tf.float32, [None, 10], name='pseudo_labels')
 
@@ -321,15 +296,6 @@ class cyclegan(object):
 
         # losses from VAE
 
-        # self.p_sz = self.dist.Normal(loc=tf.zeros_like(self.e_s_mu_sh),
-        #                             scale=tf.ones_like(self.e_s_mu_sh))
-        # self.p_tz = self.dist.Normal(loc=tf.zeros_like(self.e_t_mu_sh),
-        #                             scale=tf.ones_like(self.e_t_mu_sh))
-        # self.q_sz = self.dist.Normal(loc=self.e_t_mu_sh, scale=self.e_t_sig_sh)
-        # self.q_tz = self.dist.Normal(loc=self.e_t_mu_sh, scale=self.e_t_sig_sh)
-        # self.ae_loss_T_KLD = tf.reduce_mean(self.dist.kl_divergence(self.q_tz, self.p_tz))
-        # self.ae_loss_S_KLD = tf.reduce_mean(self.dist.kl_divergence(self.q_sz, self.p_sz))
-
 
         #'''
         self.e_t_mu_sh_2 = tf.square(self.e_t_mu_sh)
@@ -343,7 +309,7 @@ class cyclegan(object):
         self.ae_loss_S_KLD = self.lkld * .5 * tf.reduce_mean(
             self.e_s_mu_sh_2 + self.e_s_sig_sh_2 - tf.log(self.e_s_sig_sh_2))
         #'''
-
+        #another way to do kl divergence:
         #self.ae_loss_T_KLD = self.lkld * tf.reduce_mean(-.5 * tf.reduce_sum(1. + self.e_t_sig_sh - tf.pow(self.e_t_mu_sh, 2)
         #                                         - tf.exp(self.e_t_sig_sh), reduction_indices=1))
 
@@ -353,17 +319,12 @@ class cyclegan(object):
         self.ae_loss_T_BCE = self.ltbce * tf.reduce_mean(tf.square(self.real_T - self.ae_T_T))
         self.ae_loss_S_BCE = self.lbce * tf.reduce_mean(tf.square(self.real_S - self.ae_S_S))
 
-
         self.ae_loss_T_vae = self.ae_loss_T_KLD + self.ae_loss_T_BCE
         self.ae_loss_S_vae = self.ae_loss_S_KLD + self.ae_loss_S_BCE
 
-        #feature matching across domain translation
-        #self.ae_loss_S_feat = self.lkld * mae_criterion(self.D_S_feats - self.D_S_T_feats, tf.zeros_like(self.D_S_feats))
-        #self.ae_loss_T_feat = self.lkld * mae_criterion(self.D_T_feats - self.D_T_S_feats, tf.zeros_like(self.D_T_feats))
-
-        #combining losses
-        self.ae_loss_T = self.ae_loss_T_vae + self.ae_loss_T2T_d + self.ae_loss_S2T_d #  + self.ae_loss_T_feat
-        self.ae_loss_S = self.ae_loss_S_vae + self.ae_loss_S2S_d + self.ae_loss_T2S_d #  + self.ae_loss_S_feat
+        # combining losses
+        self.ae_loss_T = self.ae_loss_T_vae + self.ae_loss_T2T_d + self.ae_loss_S2T_d
+        self.ae_loss_S = self.ae_loss_S_vae + self.ae_loss_S2S_d + self.ae_loss_T2S_d
         self.ae_loss = self.ae_loss_T + self.ae_loss_S + \
                        self.ae_loss_S_S_cl + self.ae_loss_S_T_cl + \
                        self.ae_loss_T_S_cl_pseudo + self.ae_loss_T_S_cl_labeled + \
@@ -373,7 +334,7 @@ class cyclegan(object):
 
         # losses for Discriminator
 
-        # to avoid repeated generation
+        # to avoid repeated generation, placeholders for generated images
         self.fake_T_T_sample = tf.placeholder(tf.float32, [None, self.image_size, self.image_size, self.input_c_dim],
                                               name='fake_T_T_sample')
         self.fake_T_S_sample = tf.placeholder(tf.float32, [None, self.image_size, self.image_size, self.input_c_dim],
@@ -435,13 +396,12 @@ class cyclegan(object):
             self.d_lT_loss_classifier = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
                 logits=self.DlT_cls_ex, labels=self.y_T))
 
-        #this is really d_s_loss classifier
+        # this is really d_s_loss classifier
         if self.ldsclass == 0:
-            self.d_S_S_loss_classifier = 0
+            self.d_S_loss_classifier = 0
         else:
-            self.d_S_S_loss_classifier = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
+            self.d_S_loss_classifier = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
                 logits=self.D_S_cls, labels=self.y_S))
-
 
         if self.ldstclass == 0:
             self.d_S_T_loss_classifier = 0
@@ -458,7 +418,7 @@ class cyclegan(object):
                         self.d_T_loss_feat
 
         self.d_S_loss = self.d_S_loss_real_dom + self.d_S_S_loss_dom + self.d_T_S_loss_dom + \
-                        self.ldsclass * self.d_S_S_loss_classifier + self.d_S_loss_feat
+                        self.ldsclass * self.d_S_loss_classifier + self.d_S_loss_feat
 
         self.d_loss = self.d_T_loss + self.d_S_loss
 
@@ -469,7 +429,6 @@ class cyclegan(object):
         self.ae_loss_T_vae_sum = tf.summary.scalar("ae_loss_T_vae", self.ae_loss_T_vae)
         self.ae_loss_T_BCE_sum = tf.summary.scalar("ae_loss_T_BCE", self.ae_loss_T_BCE)
         self.ae_loss_T_KLD_sum = tf.summary.scalar("ae_loss_T_KLD", self.ae_loss_T_KLD)
-        #self.ae_loss_T_feat_sum = tf.summary.scalar("ae_loss_T_feat", self.ae_loss_T_feat)
         self.ae_T_sum = tf.summary.scalar("ae_loss_t", self.ae_loss_T)
 
         self.ae_loss_S2S_d_sum = tf.summary.scalar("ae_loss_S2S_d", self.ae_loss_S2S_d)
@@ -477,9 +436,6 @@ class cyclegan(object):
         self.ae_loss_S_vae_sum = tf.summary.scalar("ae_loss_S_vae", self.ae_loss_S_vae)
         self.ae_loss_S_BCE_sum = tf.summary.scalar("ae_loss_S_BCE", self.ae_loss_S_BCE)
         self.ae_loss_S_KLD_sum = tf.summary.scalar("ae_loss_S_KLD", self.ae_loss_S_KLD)
-        #self.ae_loss_S_feat_sum = tf.summary.scalar("ae_loss_S_feat", self.ae_loss_S_feat)
-
-
         self.ae_S_sum = tf.summary.scalar("ae_loss_S", self.ae_loss_S)
 
         self.ae_loss_S_S_cl_sum = tf.summary.scalar("ae_loss_S_S_cl", self.ae_loss_S_S_cl)
@@ -503,7 +459,7 @@ class cyclegan(object):
         self.d_S_T_loss_dom_sum = tf.summary.scalar("d_S_T_loss_dom", self.d_S_T_loss_dom)
 
         self.d_lt_loss_real_classifier_sum = tf.summary.scalar("d_lT_real_classifier", self.d_lT_loss_classifier)
-        self.d_S_S_loss_real_classifier_sum = tf.summary.scalar("d_S_S_real_classifier", self.d_S_S_loss_classifier)
+        self.d_S_loss_real_classifier_sum = tf.summary.scalar("d_S_real_classifier", self.d_S_loss_classifier)
         self.d_S_T_loss_real_classifier_sum = tf.summary.scalar("d_S_T_real_classifier", self.d_S_T_loss_classifier)
 
         self.ae_summary = tf.summary.merge(
@@ -512,12 +468,11 @@ class cyclegan(object):
              self.ae_S_sum, self.ae_loss_S_vae_sum, self.ae_loss_S_BCE_sum, self.ae_loss_S_KLD_sum,
              self.ae_loss_S_S_cl_sum, self.ae_loss_S_T_cl_sum, self.ae_loss_T_T_cl_labeled_sum,
              self.ae_loss_T_S_cl_labeled_sum, self.ae_loss_T_S_cl_pseudo_sum
-             #self.ae_loss_S_feat_sum, self.ae_loss_T_feat_sum
              ])
 
         self.d_summary = tf.summary.merge(
             [self.d_S_loss_sum, self.d_S_loss_real_sum, self.d_S_S_loss_dom_sum, self.d_T_S_loss_dom_sum,
-             self.d_S_S_loss_real_classifier_sum,
+             self.d_S_loss_real_classifier_sum,
              self.d_T_loss_sum, self.d_T_loss_real_sum, self.d_T_T_loss_dom_sum, self.d_S_T_loss_dom_sum,
              self.d_S_T_loss_real_classifier_sum, self.d_lt_loss_real_classifier_sum,
              self.d_S_loss_feat_sum, self.d_T_loss_feat_sum
@@ -547,34 +502,16 @@ class cyclegan(object):
         self.train_enc_vars = self.enc_S_vars + self.dec_S_vars +self.enc_T_vars + self.dec_T_vars + \
                               self.dec_x_vars + self.enc_x_vars
 
-
-
         self.ae_vars = self.enc_S_vars + self.dec_S_vars + self.dec_x_vars + self.enc_x_vars + \
                                                self.enc_T_vars + self.dec_T_vars
 
-        print("s training vars vae:")
-        for var in self.train_S_enc_vars: print (var.name)
-        print("t training vars vae:")
-        for var in self.train_T_enc_vars: print(var.name)
-        print("s training vars dsc:")
-        for var in self.train_dsc_S_vars: print(var.name)
 
-        pass
 
     def train(self, args):
-        print("Training VAE")
+        print("Training COVAEGAN")
 
+        print("Initializing Optimizers")
 
-        """Train cyclegan"""
-
-        print ("Initializing Optimizers")
-        temp = set(tf.global_variables())
-
-        #self.d_T_optim = tf.train.AdamOptimizer(args.lr, beta1=args.beta1) \
-        #                .minimize(self.d_T_loss, var_list=self.train_dsc_T_vars)
-
-        #self.d_S_optim = tf.train.AdamOptimizer(args.lr, beta1=args.beta1) \
-        #                .minimize(self.d_S_loss, var_list=self.train_dsc_S_vars)
 
         self.d_optim = tf.train.AdamOptimizer(args.lr, beta1=args.beta1) \
                          .minimize(self.d_loss, var_list=self.train_dsc_vars)
@@ -582,11 +519,9 @@ class cyclegan(object):
         self.ae_optim = tf.train.AdamOptimizer(args.lr, beta1=args.beta1) \
                             .minimize(self.ae_loss, var_list=self.train_enc_vars)
 
-
         print("Initializing Variables")
         init_op = tf.global_variables_initializer()
         self.sess.run(init_op)
-
 
         self.writer = tf.summary.FileWriter("C:/local/DCGAN/TFCNN/logs", self.sess.graph)
 
@@ -604,7 +539,6 @@ class cyclegan(object):
         for x in newvars:
             self.checklistload.append((x.name, self.sess.run(x)))
 
-        #self.test_sourcerep()
         self.test_classifier(args, load=False)
 
         print("Commencing Training")
@@ -618,20 +552,15 @@ class cyclegan(object):
                 for x in newvars:
                     checklist2.append((x.name, self.sess.run(x)))
 
-                # NOTE: A is source, B is target
                 batch_t_x, _ = self.loadedtargetdata.train.next_batch(self.batch_size)
                 batch_s_x, batch_s_y = self.loadedsourcedata.train.next_batch(self.batch_size)
 
                 self.batch_labeledtarget_x, self.batch_labeledtarget_y = \
                     self.loadedtargetdata.train.next_lbatch(self.lbatchsize)
 
-
                 # Forward G network
                 epsilon = numpy.random.normal(self.emu, self.esig,
                                               size=(self.batch_size, self.zdepth, self.zdepth, self.epsize))
-
-
-
                 # for testing
                 fake_T_T, fake_T_S = self.sess.run([self.ae_T_T, self.ae_T_S],
                                                    feed_dict={self.real_T: batch_t_x,self.l_t_epsilon: epsilon})
@@ -652,32 +581,14 @@ class cyclegan(object):
                                                               self.y_S: batch_s_y,
                                                               self.y_T: self.batch_labeledtarget_y,
                                                               self.labeled_T: self.batch_labeledtarget_x})
-
-
                     self.writer.add_summary(summary_str, counter)
 
-                #debugging values
-                '''
-                testesstd, testessigsh, testesmush, testesz, testlsepsilon, \
-                testetstd, testestigsh, testetmush, testetz, testltepsilon,\
-                testaess,testaett, testaelosstkld,testaelosstvae,testaelosstbce,\
-                testaelossskld, testaelosssvae, testaelosssbce = self.sess.run(
-                    [self.e_s_std, self.e_s_sig_sh, self.e_s_mu_sh, self.e_s_z, self.l_s_epsilon,
-                     self.e_t_std, self.e_t_sig_sh, self.e_t_mu_sh, self.e_t_z, self.l_t_epsilon,
-                     self.ae_S_S, self.ae_T_T,
-                     self.ae_loss_T_KLD, self.ae_loss_T_vae, self.ae_loss_T_BCE,
-                     self.ae_loss_S_KLD, self.ae_loss_S_vae,self.ae_loss_S_BCE],
-                    feed_dict={self.real_S: batch_s_x, self.real_T: batch_t_x,
-                               self.l_t_epsilon: epsilon, self.l_s_epsilon: epsilon})
-                # print()
-                '''
+                #pseudolabels for trianing
                 fake_y_T = self.sess.run(self.pseudolabel1,
                                                    feed_dict={self.real_T: batch_t_x, self.l_t_epsilon: epsilon})
-                                                              #self.l_t_epsilon2: epsilon2, self.l_t_epsilon3: epsilon3})
 
                 for k in range(self.g_iter):
                     # Update G network
-
                     epsilon = numpy.random.normal(self.emu, self.esig,
                                                   size=(self.batch_size, self.zdepth, self.zdepth, self.epsize))
 
@@ -693,7 +604,6 @@ class cyclegan(object):
                                                               self.l_lt_epsilon: epsilont,
                                                               })
                     self.writer.add_summary(summary_str, counter)
-
 
                 counter += 1
                 batch_counter +=1
@@ -711,13 +621,11 @@ class cyclegan(object):
                 if np.mod(counter, 200) == 0:
                     self.save(args.checkpoint_dir, counter)
 
-    def trainNoClass(self, args):
-        pass
 
     def trainVAE(self, args):
         print("Pre-Training VAE")
 
-        """Train cyclegan"""
+
         print("Initializing Optimizers")
 
         self.ae_optim = tf.train.AdamOptimizer(args.lr, beta1=args.beta1) \
@@ -776,10 +684,6 @@ class cyclegan(object):
         tsize = 1000
         epsilon = numpy.random.normal(self.emu, self.esig,
                                       size=(tsize, self.zdepth, self.zdepth, self.epsize))
-        #epsilon2 = numpy.random.normal(self.emu, self.esig,
-        #                               size=(tsize, self.zdepth2, self.zdepth2, self.epsize2))
-        #epsilon3 = numpy.random.normal(self.emu, self.esig,
-        #                               size=(tsize, self.zdepth3, self.zdepth3, self.epsize3))
 
         input_S_x = self.batch_testingsource_x
         input_S_y = self.batch_testingsource_y
@@ -799,17 +703,6 @@ class cyclegan(object):
         accuracy_S = acc2_S.eval()
         print("AccuracyS:", accuracy_S)
 
-        cm = numpy.zeros((10, 10))
-        #for a, p in zip(label_S_true, label_S_predicted):
-        #    cm[a][p] += 1
-
-        #print(label_S_true[0:20])
-        #print(label_S_predicted[0:20])
-
-
-        ##print("confusion matrixS:")
-        ##print(cm)
-        #cm = numpy.hstack((cm, cm))
 
         pred_SS = self.D_S_S_class
         pred_SS_logit = tf.argmax(pred_SS, 1)
@@ -823,16 +716,6 @@ class cyclegan(object):
         accuracy_SS = acc2_SS.eval()
         print("AccuracySS:", accuracy_SS)
 
-        cm = numpy.zeros((10, 10))
-        #for a, p in zip(label_SS_true, label_SS_predicted):
-            #cm[a][p] += 1
-
-        #print(label_SS_true[0:20])
-        #print(label_SS_predicted[0:20])
-
-        ##print("confusion matrixSS:")
-        ##print(cm)
-
         pred_ST = self.D_S_T_class
         pred_ST_logit = tf.argmax(pred_ST, 1)
         label_ST_logit = tf.argmax(self.y_S, 1)
@@ -844,14 +727,6 @@ class cyclegan(object):
         acc2_ST = tf.reduce_mean(tf.cast(acc_ST, "float"))
         accuracy_ST = acc2_ST.eval()
         print("AccuracyST:", accuracy_ST)
-        cm = numpy.zeros((10, 10))
-        #for a, p in zip(label_ST_true, label_ST_predicted):
-         #   cm[a][p] += 1
-        #print(label_ST_true[0:20])
-        #print(label_ST_predicted[0:20])
-
-        ##print("confusion matrixST:")
-        ##print(cm)
 
         pred_T = self.D_T_cls
         pred_T_logit = tf.argmax(pred_T, 1)
@@ -862,74 +737,40 @@ class cyclegan(object):
         acc2_T = tf.reduce_mean(tf.cast(acc_T, "float"))
         accuracy_T = acc2_T.eval()
         print("AccuracyT:", accuracy_T)
-        cm = numpy.zeros((10, 10))
-        #for a, p in zip(label_T_true, label_T_predicted):
-        #    cm[a][p] += 1
-
-        #print(label_T_true[0:20])
-        #print(label_T_predicted[0:20])
-        ##print("confusion matrixT:")
-        ##print(cm)
-
 
         pred_TT = self.D_T_T_class
         pred_TT_logit = tf.argmax(pred_TT, 1)
         label_TT_logit = tf.argmax(self.y_S, 1)
         label_TT_predicted = pred_TT_logit.eval({self.real_T: input_T_x,
                                                  self.l_t_epsilon: epsilon, self.l_s_epsilon: epsilon
-                                                 #self.l_t_epsilon2: epsilon2, self.l_t_epsilon3: epsilon3
                                                  })
+
         label_TT_true = label_TT_logit.eval({self.y_S: input_T_y})
         acc_TT = tf.equal(label_TT_true, label_TT_predicted)
         acc2_TT = tf.reduce_mean(tf.cast(acc_TT, "float"))
         accuracy_TT = acc2_TT.eval()
         print("AccuracyTT:", accuracy_TT)
-        cm = numpy.zeros((10, 10))
-        #for a, p in zip(label_TT_true, label_TT_predicted):
-        #    cm[a][p] += 1
-
-        #print(label_TT_true[0:20])
-        #print(label_TT_predicted[0:20])
-        ##print("confusion matrixTT:")
-        ##print(cm)
-
 
         pred_TS = self.D_T_S_class
         pred_TS_logit = tf.argmax(pred_TS, 1)
         label_TS_logit = tf.argmax(self.y_S, 1)
         label_TS_predicted = pred_TS_logit.eval({self.real_T: input_T_x,
                                                  self.l_t_epsilon: epsilon, self.l_s_epsilon: epsilon
-                                                 #self.l_t_epsilon2: epsilon2, self.l_t_epsilon3: epsilon3
                                                  })
         label_TS_true = label_TS_logit.eval({self.y_S: input_T_y})
         acc_TS = tf.equal(label_TS_true, label_TS_predicted)
         acc2_TS = tf.reduce_mean(tf.cast(acc_TS, "float"))
         accuracy_TS = acc2_TS.eval()
         print("AccuracyT_S:", accuracy_TS)
-        cm = numpy.zeros((10, 10))
-        #for a, p in zip(label_TS_true, label_TS_predicted):
-        #    cm[a][p] += 1
-        #print(label_TS_true[0:20])
-        #print(label_TS_predicted[0:20])
-
-        ##print("confusion matrixTS:")
-        ##print(cm)
 
         if accuracy_T> self.maxt:
             self.maxt = accuracy_T
-            #self.save('checkpoint2', counter)
-
-            #self.testfull()
 
         if accuracy_TS> self.maxts:
             self.maxts = accuracy_TS
-            #self.save('checkpoint2', counter)
 
-            #self.testfull()
         print('max_t_local=' + str(self.maxt))
         print('max_ts_local=' + str(self.maxts))
-
-
 
         if counter > 0:
             summary = tf.Summary(value=[tf.Summary.Value(tag="cl_S", simple_value=accuracy_S),
@@ -944,26 +785,17 @@ class cyclegan(object):
 
     def testfull(self):
 
-        #input_S_x = self.batch_testingsource_x
-        #input_S_y = self.batch_testingsource_y
-
         input_T_x = self.loadedtargetdata.test.images
         input_T_y = self.loadedtargetdata.test.labels
 
         tsize = input_T_x.shape[0]
         epsilon = numpy.random.normal(self.emu, self.esig,
                                       size=(tsize, self.zdepth, self.zdepth, self.epsize))
-        #epsilon2 = numpy.random.normal(self.emu, self.esig,
-        #                               size=(tsize, self.zdepth2, self.zdepth2, self.epsize2))
-        #epsilon3 = numpy.random.normal(self.emu, self.esig,
-        #                               size=(tsize, self.zdepth3, self.zdepth3, self.epsize3))
-
         pred_TS = self.D_T_S_class
         pred_TS_logit = tf.argmax(pred_TS, 1)
         label_TS_logit = tf.argmax(self.y_S, 1)
         label_TS_predicted = pred_TS_logit.eval({self.real_T: input_T_x,
                                                  self.l_t_epsilon: epsilon, self.l_s_epsilon: epsilon
-                                                 #self.l_t_epsilon2: epsilon2, self.l_t_epsilon3: epsilon3
                                                  })
         label_TS_true = label_TS_logit.eval({self.y_S: input_T_y})
         acc_TS = tf.equal(label_TS_true, label_TS_predicted)
@@ -1046,8 +878,6 @@ class cyclegan(object):
 
         input_T_x = self.batch_samplingtarget_x
         input_S_x = self.batch_samplingsource_x
-        # input_T_y = self.batch_testingtarget_y
-        # input_S_y = self.batch_testingsource_y
 
         size = 8
 
@@ -1066,32 +896,17 @@ class cyclegan(object):
 
         epsilon = numpy.random.normal(self.emu, self.esig,
                                       size=(self.batch_size, self.zdepth, self.zdepth, self.epsize))
-        #epsilon2 = numpy.random.normal(self.emu, self.esig,
-        #                               size=(self.batch_size, self.zdepth2, self.zdepth2, self.epsize2))
-        #epsilon3 = numpy.random.normal(self.emu, self.esig,
-        #                               size=(self.batch_size, self.zdepth3, self.zdepth3, self.epsize3))
         fake_T_T, fake_T_S, = self.sess.run(
             [self.ae_T_T, self.ae_T_S],
             feed_dict={self.real_T: input_T_x,
                        self.l_t_epsilon:epsilon, self.l_s_epsilon:epsilon
-                       #self.l_s_epsilon2: epsilon2, self.l_s_epsilon3: epsilon3,
-                       #self.l_t_epsilon2: epsilon2, self.l_t_epsilon3: epsilon3
                        })
 
-        #fake_S_T, fake_S_S, fake_S_T_S = self.sess.run(
-            #[self.ae_S_T, self.ae_S_S, self.ae_S_T_S],
         fake_S_T, fake_S_S = self.sess.run(
             [self.ae_S_T, self.ae_S_S],
             feed_dict={self.real_S: input_S_x,
                        self.l_t_epsilon:epsilon, self.l_s_epsilon:epsilon
-                       #self.l_s_epsilon2: epsilon2, self.l_s_epsilon3: epsilon3,
-                       #self.l_t_epsilon2: epsilon2, self.l_t_epsilon3: epsilon3
                        })
-
-
-        # fake_T_T = col_2_grid(image=fake_T_T, imsize=32)
-
-        #reduced = numpy.mean(fake_T_T,axis=3)
 
         save_images(fake_T_T, [size, size],
                     './{}/T_T___{:02d}_{:04d}.jpg'.format(sample_dir, epoch, idx))
@@ -1102,6 +917,4 @@ class cyclegan(object):
                     './{}/T_S___{:02d}_{:04d}.jpg'.format(sample_dir, epoch, idx))
         save_images(fake_S_T, [size, size],
                     './{}/S_T___{:02d}_{:04d}.jpg'.format(sample_dir, epoch, idx))
-        #save_images(fake_S_T_S, [size, size],
-                    #'./{}/S_T_S_{:02d}_{:04d}.jpg'.format(sample_dir, epoch, idx))
 

@@ -60,12 +60,8 @@ def main(_):
             sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
 
         model = cyclegan(sess, args)
-        #model.train_classifier(args)
-        # model.trainVAE(args)
-        model.train(args)
-        #model.train(args) if args.phase == 'train' \
-        #    else model.train_classifier(args)
-
+        # model.trainVAE(args) # for pretraining VAE
+        model.train(args) # training full network
 
 if __name__ == '__main__':
     tf.app.run()
